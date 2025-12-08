@@ -1,7 +1,7 @@
 *XIN LỖI VÌ BOT CÒN QUÁ NHIỀU LỖI CHƯA ĐƯỢC SỬA HẾT Ạ , MONG MỌI NGƯỜI THÔNG CẢM VÀ ĐỪNG SỬ DỤNG*
 
 👉 Bot được *mod lại từ Mirai*, *Niio*, *Lunar-Krystal* và nhiều source khác.
-👉 Nghe chuyên nghiệp – đầy đủ – giữ nguyên “tinh thần” của WOLFBOT.
+
 
 ---
 
