@@ -66,16 +66,37 @@ for (const item of langData) {
 global.getText = function (...args) {
     const langText = global.language;    
     if (!langText.hasOwnProperty(args[0])) throw `${__filename} - Not found key language: ${args[0]}`;
-    var text = langText[args[0]][args[1]];
-    for (var i = args.length - 1; i > 0; i--) {
-        const regEx = RegExp(`%${i}`, 'g');
-        text = text.replace(regEx, args[i + 1]);
-    }
+        let text = langText[args[0]][args[1]] || '';
+        for (let i = 2; i < args.length; i++) {
+          const regEx = RegExp(`%${i - 1}`, 'g');
+          text = text.replace(regEx, args[i]);
+        }
     return text;
 }
 function onBot({ models }) {
-    login({ appState: global.utils.parseCookies(fs.readFileSync('./cookie.txt', 'utf8'))}, async (loginError, api) => {
-        if (loginError) return console.log(loginError);
+  // Load Facebook appState (cookie) safely with fallbacks
+  let appState = null;
+  try {
+    if (fs.existsSync('./cookie.txt')) {
+      const raw = fs.readFileSync('./cookie.txt', 'utf8');
+      try { appState = global.utils.parseCookies(raw); } catch (e) { console.warn('Không thể parse cookie.txt:', e.message); }
+    }
+  } catch (e) { /* ignore */ }
+  if (!appState) {
+    try {
+      const fbstatePath = './utils/data/fbstate.json';
+      if (fs.existsSync(fbstatePath)) {
+        appState = JSON.parse(fs.readFileSync(fbstatePath, 'utf8'));
+      }
+    } catch (e) { console.warn('Không thể đọc utils/data/fbstate.json:', e.message); }
+  }
+  if (!appState) {
+    console.error('Không tìm thấy appState (cookie). Tạo file `cookie.txt` hoặc `./utils/data/fbstate.json` để tiếp tục.');
+    return;
+  }
+
+  login({ appState }, async (loginError, api) => {
+    if (loginError) return console.log(loginError);
         api.setOptions(global.config.FCAOption);
         writeFileSync('./utils/data/fbstate.json', JSON.stringify(api.getAppState(), null, 2));
         global.config.version = '3.0.0';
@@ -117,16 +138,21 @@ function onBot({ models }) {
 
         console.log(bottomBox);
 
-        function showFrame({ threadName, senderName, message, time }) {
-          console.log(
-            chalk.hex("#DEADED")("\n========= WolfBot Console Log ==============") + "\n" +
-            chalk.hex("#C0FFEE")("├─ Nhóm: " + threadName) + "\n" +
-            chalk.hex("#FFAACC")("├─ User: " + senderName) + "\n" +
-            chalk.hex("#A3FF00")("├─ Nội dung: " + message) + "\n" +
-            chalk.hex("#FFFF00")("├─ Time: " + time) + "\n" +
-            chalk.hex("#DEADED")("==============================================\n")
-          );
-        }
+        // Expose showFrame globally so other modules can invoke console logging for events
+        global.showFrame = function ({ threadName, senderName, message, time }) {
+          try {
+            console.log(
+              chalk.hex("#DEADED")("\n========= WolfBot Console Log ==============") + "\n" +
+              chalk.hex("#C0FFEE")("├─ Nhóm: " + threadName) + "\n" +
+              chalk.hex("#FFAACC")("├─ User: " + senderName) + "\n" +
+              chalk.hex("#A3FF00")("├─ Nội dung: " + message) + "\n" +
+              chalk.hex("#FFFF00")("├─ Time: " + time) + "\n" +
+              chalk.hex("#DEADED")("============================================\n")
+            );
+          } catch (e) {
+            console.error('showFrame error:', e.message);
+          }
+        };
         (function () {
             const loadModules = (path, collection, disabledList, type) => {
               let loadedCount = 0;
@@ -158,8 +184,14 @@ function onBot({ models }) {
                         continue;
                       }
                       if (type === 'commands' && !config.commandCategory) {
-                        console.error(`Lỗi: Lệnh ${config.name || item} không có commandCategory trong file: ${item}`);
-                        continue;
+                        // Some modules use `category` instead of `commandCategory` or omit it.
+                        // Prefer a warning and fallback rather than hard failure.
+                        if (config.category) {
+                          config.commandCategory = config.category;
+                        } else {
+                          console.warn(`Cảnh báo: Lệnh ${config.name || item} thiếu 'commandCategory' trong file: ${item}. Sử dụng 'General' làm mặc định.`);
+                          config.commandCategory = config.commandCategory || 'General';
+                        }
                       }
                       if (global.client[collection].has(config.name)) {
                         console.error(`Tên ${type === 'commands' ? 'lệnh' : 'sự kiện'} đã tồn tại: ${config.name}`);

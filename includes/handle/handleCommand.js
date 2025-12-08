@@ -27,9 +27,12 @@ module.exports = function ({ api, models, Users, Threads, Currencies }) {
         if (event.senderID != api.getCurrentUserID() && !ADMINBOT.includes(senderID)) {
             let thuebot;
             try { thuebot = JSON.parse(require('fs-extra').readFileSync(process.cwd() + '/modules/data/thuebot.json')); } catch { thuebot = []; };
-            let find_thuebot = thuebot.find($ => $.t_id == threadID);
+            // normalize stored IDs to string for reliable matching
+            thuebot = (thuebot || []).map(x => ({ ...x, t_id: String(x.t_id) }));
+            let find_thuebot = thuebot.find($ => String($.t_id) === String(threadID));
             if ((prefixTO[threadID] + 'bank') != event.body[0]) {
-                if (!find_thuebot) return api.sendMessage(`❎ Nhóm của bạn chưa thuê bot, vui lòng reply tin nhắn này và nhập key thuê bot hoặc liên hệ Admin để lấy key thuê bot\nfb: ${(!global.config.FACEBOOK_ADMIN) ? "Exclude Admin if not configured!" : global.config.FACEBOOK_ADMIN}`, event.threadID, (e, i) => {
+                const adminContact = (global.config.FACEBOOK_ADMIN && global.config.FACEBOOK_ADMIN.trim()) ? global.config.FACEBOOK_ADMIN : ((Array.isArray(global.config.BOXADMIN) && global.config.BOXADMIN.length) ? global.config.BOXADMIN[0] : (Array.isArray(global.config.ADMINBOT) && global.config.ADMINBOT.length ? global.config.ADMINBOT[0] : "Chưa cấu hình"));
+                if (!find_thuebot) return api.sendMessage(`❎ Nhóm của bạn chưa thuê bot, vui lòng reply tin nhắn này và nhập key thuê bot hoặc liên hệ Admin để lấy key thuê bot\nLiên hệ Admin: ${adminContact}`, event.threadID, (e, i) => {
                     global.client.handleReply.push({
                         name: 'rent',
                         messageID: i.messageID,
@@ -37,7 +40,7 @@ module.exports = function ({ api, models, Users, Threads, Currencies }) {
                         type: 'RentKey'
                     });
                 });
-                if (new Date(form_mm_dd_yyyy(find_thuebot.time_end)).getTime() <= Date.now() + 25200000) return api.sendMessage(`⚠️ Thời hạn sử dụng bot của nhóm bạn đã hết. Vui lòng reply tin nhắn này và nhập mã key mới, hoặc liên hệ Admin để được hỗ trợ.\nfb: ${(!global.config.FACEBOOK_ADMIN) ? "Exclude Admin if not configured!" : global.config.FACEBOOK_ADMIN}`, event.threadID, (e, i) => {
+                if (new Date(form_mm_dd_yyyy(find_thuebot.time_end)).getTime() <= Date.now() + 25200000) return api.sendMessage(`⚠️ Thời hạn sử dụng bot của nhóm bạn đã hết. Vui lòng reply tin nhắn này và nhập mã key mới, hoặc liên hệ Admin để được hỗ trợ.\nLiên hệ Admin: ${adminContact}`, event.threadID, (e, i) => {
                     global.client.handleReply.push({
                         name: 'rent',
                         messageID: i.messageID,

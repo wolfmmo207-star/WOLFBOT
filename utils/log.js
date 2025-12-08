@@ -87,7 +87,12 @@ module.exports = (text, type) => {
       process.stderr.write(chalk.bold.hex("#ff0000").bold(`\r[ ERROR ]`) + ` > ${text}` + '\n');
       break;
     default:
-      process.stderr.write(chalk.bold(co(`\r${String(type).toUpperCase()} ${text}`) + '\n'));
+      if (!type) {
+        // No type provided: print message without 'UNDEFINED' prefix
+        process.stderr.write(chalk.bold(co(`\r${text}`) + '\n'));
+      } else {
+        process.stderr.write(chalk.bold(co(`\r${String(type).toUpperCase()} ${text}`) + '\n'));
+      }
       break;
   }
 };

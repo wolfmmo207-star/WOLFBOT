@@ -56,23 +56,41 @@ module.exports.config = {
 
 module.exports.run = async function ({ api, event, Users }) {
 	const { threadID } = event;
-	var memJoin = event.logMessageData.addedParticipants//.map(info => info.userFbId)
-	for (let { userFbId: idUser, fullName } of memJoin) {
-		const { readFileSync, writeFileSync } = require("fs-extra");
-		const { join } = require("path")
-		const pathData = join("./modules", "data", "autosetname.json");
-		var dataJson = JSON.parse(readFileSync(pathData, "utf-8"));
-		var thisThread = dataJson.find(item => item.threadID == threadID) || { threadID, nameUser: [] };
-		if (thisThread.nameUser.length == 0) return
-		if (thisThread.nameUser.length != 0) {
-			var setName = thisThread.nameUser[0]
-			await new Promise(resolve => setTimeout(resolve, 1000));
-			//var namee1 = await api.getUserInfo(idUser)
-			//var namee = namee1[idUser].name
-			api.changeNickname(`${setName
-				.replace(/{name}/g, fullName)
-				.replace(/{time}/g, require('moment-timezone')().tz('Asia/Ho_Chi_Minh').format('HH:MM:ss | DD/MM/YYYY'))}`, threadID, idUser);
+	const memJoin = event.logMessageData.addedParticipants || [];
+	const fs = require('fs-extra');
+	const { join } = require('path');
+	const pathData = join(process.cwd(), 'modules', 'data', 'autosetname.json');
+	try {
+		if (!fs.existsSync(pathData)) {
+			fs.mkdirpSync(join(process.cwd(), 'modules', 'data'));
+			fs.writeFileSync(pathData, JSON.stringify([], null, 2), 'utf8');
 		}
+		let dataJson = [];
+		try {
+			const raw = fs.readFileSync(pathData, 'utf-8');
+			dataJson = raw ? JSON.parse(raw) : [];
+		} catch (e) {
+			dataJson = [];
+		}
+		if (!Array.isArray(dataJson)) dataJson = [];
+
+		const thisThread = dataJson.find(item => String(item.threadID) === String(threadID)) || { threadID, nameUser: [] };
+		if (!thisThread.nameUser || thisThread.nameUser.length === 0) return;
+
+		const setName = thisThread.nameUser[0];
+		for (let { userFbId: idUser, fullName } of memJoin) {
+			try {
+				await new Promise(resolve => setTimeout(resolve, 1000));
+				const nickname = String(setName)
+					.replace(/{name}/g, fullName)
+					.replace(/{time}/g, require('moment-timezone')().tz('Asia/Ho_Chi_Minh').format('HH:mm:ss | DD/MM/YYYY'));
+				await api.changeNickname(nickname, threadID, idUser);
+			} catch (err) {
+				console.error(`autosetname: failed to set nickname for ${idUser}:`, err.message || err);
+			}
+		}
+	} catch (error) {
+		console.error('Error in autosetname module:', error);
 	}
-	return api.sendMessage(`✅ Thực thi auto setname cho thành viên mới`, threadID, event.messageID)
+	try { return api.sendMessage(`✅ Thực thi auto setname cho thành viên mới`, threadID, event.messageID); } catch (e) { return; }
 }

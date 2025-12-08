@@ -10,19 +10,23 @@ module.exports.config = {
 };
 module.exports.run = async ({ api, event, handleReply, Users, Threads, Currencies }) => {
   const { threadID, messageID, senderID } = event;
-  var data = await Currencies.getData(event.senderID);
-  var money = data.money
-  if (money = 0) api.sendMessage(`💵 Bạn cần có 5000$ để ghép đôi!`, threadID, messageID);
-  else {
-    Currencies.setData(event.senderID, options = { money: money - 0 })
+  const COST = 5000;
+  try {
+    const data = await Currencies.getData(String(senderID)) || {};
+    const money = typeof data.money === 'number' ? data.money : 0;
+    if (money < COST) return api.sendMessage(`💵 Bạn cần có ${COST}$ để ghép đôi!`, threadID, messageID);
+    // deduct amount (best-effort)
+    try { await Currencies.setData(String(senderID), { money: money - COST }); } catch (e) {}
     return api.sendMessage(`Phản hồi tin nhắn để chọn giới tính.\n\n[ Nam hoặc Nữ ]`, event.threadID, (error, info) => {
       global.client.handleReply.push({
         type: "ghep",
         name: this.config.name,
-        author: event.senderID,
+        author: String(event.senderID),
         messageID: info.messageID
       })
     })
+  } catch (e) {
+    return api.sendMessage(`Đã xảy ra lỗi khi kiểm tra số dư.`, threadID, messageID);
   }
 }
 module.exports.handleReply = async ({ api, event, handleReply, Users, Threads, Currencies }) => {

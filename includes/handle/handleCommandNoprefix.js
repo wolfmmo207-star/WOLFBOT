@@ -29,7 +29,8 @@ function ensureJSON(filePath, defaultValue = {}) {
 module.exports = function ({ api, models, Users, Threads, Currencies }) {
   return async function (event) {
     try {
-      const { ADMINBOT = [], MAINTENANCE = false, FACEBOOK_ADMIN = "Chưa cấu hình", NDH = [] } = global.config;
+      const { ADMINBOT = [], MAINTENANCE = false, FACEBOOK_ADMIN = "", NDH = [] } = global.config;
+      const adminContact = (global.config.FACEBOOK_ADMIN && global.config.FACEBOOK_ADMIN.trim()) ? global.config.FACEBOOK_ADMIN : ((Array.isArray(global.config.BOXADMIN) && global.config.BOXADMIN.length) ? global.config.BOXADMIN[0] : (Array.isArray(global.config.ADMINBOT) && global.config.ADMINBOT.length ? global.config.ADMINBOT[0] : "Chưa cấu hình"));
       const { commandBanned } = global.data;
       const { commands, cooldowns, noprefix } = global.client;
       let { body, senderID, threadID, messageID } = event;
@@ -47,15 +48,15 @@ module.exports = function ({ api, models, Users, Threads, Currencies }) {
       // === AUTO FIX FILE DATA ===
       const rentPath = path.join(process.cwd(), "modules/data/thuebot.json");
       const threadSettingsPath = path.join(process.cwd(), "utils/data/noprefix_settings.json");
-      const rentData = ensureJSON(rentPath, []);
+      const rentData = ensureJSON(rentPath, []).map(x => ({ ...x, t_id: String(x.t_id) }));
       const threadSettings = ensureJSON(threadSettingsPath, {});
 
       // === Thuê Bot Kiểm Tra ===
       if (!ADMINBOT.includes(senderID)) {
-        const threadRent = rentData.find(x => x.t_id == threadID);
+        const threadRent = rentData.find(x => String(x.t_id) === String(threadID));
         if (!threadRent) {
           return api.sendMessage(
-            `❎ Nhóm của bạn chưa thuê bot.\nLiên hệ Admin: ${FACEBOOK_ADMIN}`,
+            `❎ Nhóm của bạn chưa thuê bot.\nLiên hệ Admin: ${adminContact}`,
             threadID,
             (err, info) => {
               global.client.handleReply.push({
@@ -71,7 +72,7 @@ module.exports = function ({ api, models, Users, Threads, Currencies }) {
         const expireTime = new Date(threadRent.time_end.split("/").reverse().join("/")).getTime();
         if (expireTime <= Date.now()) {
           return api.sendMessage(
-            `⚠️ Hết hạn thuê bot.\nLiên hệ Admin: ${FACEBOOK_ADMIN}`,
+            `⚠️ Hết hạn thuê bot.\nLiên hệ Admin: ${adminContact}`,
             threadID
           );
         }

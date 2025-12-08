@@ -1,16 +1,44 @@
 {
   "name": "wolfbot",
-  "version": "2.0.0",
-  "description": "",
+  "version": "3.0.0",
+  "description": "Advanced Facebook Messenger Bot with command system, events, and rental management",
   "main": "wolfbot.js",
   "type": "commonjs",
+  "homepage": "https://github.com/ngdgnam/WOLFBOT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ngdgnam/WOLFBOT.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ngdgnam/WOLFBOT/issues"
+  },
+  "author": "ngdgnam",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0",
+    "npm": ">=6.0.0"
+  },
   "scripts": {
     "start": "node wolfbot.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "NODE_ENV=development node wolfbot.js",
+    "setup": "bash setup.sh auto",
+    "setup:termux": "bash setup.sh termux",
+    "setup:vps": "bash setup.sh vps",
+    "install:termux": "bash install-termux.sh",
+    "install:vps": "bash install-vps.sh",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "stop": "pkill -f 'node wolfbot.js'",
+    "restart": "npm stop && sleep 2 && npm start"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "facebook",
+    "messenger",
+    "bot",
+    "fca",
+    "command",
+    "event",
+    "nodejs"
+  ],
   "dependencies": {
     "@distube/ytdl-core": "^4.16.12",
     "@dongdev/fca-unofficial": "^3.0.12",

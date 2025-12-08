@@ -1,103 +1,215 @@
-this.config = {
-    name: "menu",
-    version: "1.1.1",
-    hasPermssion: 0,
-    credits: "DC-Nam mod by Niio-team",
-    description: "Xem danh sách lệnh và info",
-    commandCategory: "Nhóm",
-    usages: "[tên lệnh/all]",
-    cooldowns: 0
+module.exports.config = {
+  name: "menu",
+  version: "1.1.1",
+  hasPermssion: 0,
+  credits: "DC-Nam mod by Toàn",
+  description: "Xem danh sách nhóm lệnh, thông tin lệnh",
+  commandCategory: "Nhóm",
+  usages: "[...name commands|all]",
+  cooldowns: 5,
+  usePrefix: false,
+  envConfig: {
+    autoUnsend: {
+      status: true,
+      timeOut: 60
+    }
+  }
 };
-this.languages = {
-    "vi": {},
-    "en": {}
-}
-this.run = async function({
-    api,
-    event,
-    args
-}) {
-    const {
-        threadID: tid,
-        messageID: mid,
-        senderID: sid
-    } = event;
-    var type = !args[0] ? "" : args[0].toLowerCase();
-    var msg = "";
-    const cmds = global.client.commands;
-    const TIDdata = global.data.threadData.get(tid) || {};
-    const moment = require("moment-timezone");
-    var thu = moment.tz('Asia/Ho_Chi_Minh').format('dddd');
-    if (thu == 'Sunday') thu = 'Chủ Nhật';
-    if (thu == 'Monday') thu = 'Thứ Hai';
-    if (thu == 'Tuesday') thu = 'Thứ Ba';
-    if (thu == 'Wednesday') thu = 'Thứ Tư';
-    if (thu == "Thursday") thu = 'Thứ Năm';
-    if (thu == 'Friday') thu = 'Thứ Sáu';
-    if (thu == 'Saturday') thu = 'Thứ Bảy';
-    const time = moment.tz("Asia/Ho_Chi_Minh").format("HH:mm:s | DD/MM/YYYY");
-    const hours = moment.tz("Asia/Ho_Chi_Minh").format("HH");
-    const admin = config.ADMINBOT;
-    const NameBot = config.BOTNAME;
-    const version = config.version;
-    var prefix = TIDdata.PREFIX || global.config.PREFIX;
-    if (type == "all") {
-        const commandsList = Array.from(cmds.values()).map((cmd, index) => {
-            return `${index + 1}. ${cmd.config.name}\n📝 Mô tả: ${cmd.config.description}\n\n`;
-        }).join('');
-        return api.sendMessage(commandsList, tid, mid);
-    }
 
-    if (type) {
-        const command = Array.from(cmds.values()).find(cmd => cmd.config.name.toLowerCase() === type);
-        if (!command) {
-            const stringSimilarity = require('string-similarity');
-            const commandName = args.shift().toLowerCase() || "";
-            const commandValues = cmds['keys']();
-            const checker = stringSimilarity.findBestMatch(commandName, commandValues);
-            if (checker.bestMatch.rating >= 0.5) command = client.commands.get(checker.bestMatch.target);
-            msg = `⚠️ Không tìm thấy lệnh '${type}' trong hệ thống.\n📌 Lệnh gần giống được tìm thấy '${checker.bestMatch.target}'`;
-            return api.sendMessage(msg, tid, mid);
-        }
-        const cmd = command.config;
-        msg = `[ HƯỚNG DẪN SỬ DỤNG ]\n\n📜 Tên lệnh: ${cmd.name}\n🕹️ Phiên bản: ${cmd.version}\n🔑 Quyền Hạn: ${TextPr(cmd.hasPermssion)}\n📝 Mô Tả: ${cmd.description}\n🏘️ Nhóm: ${cmd.commandCategory}\n📌 Cách Dùng: ${cmd.usages}\n⏳ Cooldowns: ${cmd.cooldowns}s`;
-        return api.sendMessage(msg, tid, mid);
+const { autoUnsend = this.config.envConfig.autoUnsend } =
+  global.config == undefined
+    ? {}
+    : global.config.menu == undefined
+    ? {}
+    : global.config.menu;
+const { compareTwoStrings, findBestMatch } = require("string-similarity");
+const { readFileSync, writeFileSync, existsSync } = require("fs-extra");
+
+module.exports.run = async function ({ api, event, args }) {
+  const moment = require("moment-timezone");
+  const time = moment.tz("Asia/Ho_Chi_Minh").format("HH:mm:ss - DD/MM/YYYY");
+
+  const { sendMessage: send, unsendMessage: un } = api;
+  const { threadID: tid, messageID: mid, senderID: sid } = event;
+  const cmds = global.client.commands;
+
+  const video = global.vdcos && global.vdcos.length > 0 ? global.vdcos.splice(0, 1)[0] : null;
+
+  if (args.length >= 1) {
+    if (typeof cmds.get(args.join(" ")) == "object") {
+      const body = infoCmds(cmds.get(args.join(" ")).config);
+      return send(body, tid, mid);
     } else {
-        const commandsArray = Array.from(cmds.values()).map(cmd => cmd.config);
-        const array = [];
-        commandsArray.forEach(cmd => {
-            const { commandCategory, name: nameModule } = cmd;
-            const find = array.find(i => i.cmdCategory == commandCategory);
-            if (!find) {
-                array.push({
-                    cmdCategory: commandCategory,
-                    nameModule: [nameModule]
-                });
-            } else {
-                find.nameModule.push(nameModule);
-            }
-        });
-        array.sort(S("nameModule"));
-        array.forEach(cmd => {
-if (['ADMIN','NO PREFIX'].includes(cmd.cmdCategory.toUpperCase()) && !global.config.ADMINBOT.includes(sid)) return
-            msg += `[ ${cmd.cmdCategory.toUpperCase()} ]\n📝 Tổng lệnh: ${cmd.nameModule.length} lệnh\n${cmd.nameModule.join(", ")}\n\n`;
-        });
-        msg += `📝 Tổng số lệnh: ${cmds.size} lệnh\n👤 Tổng số admin bot: ${admin.length}\n👾 Tên Bot: ${NameBot}\n🕹️ Phiên bản: ${version}\n⏰ Hôm nay là: ${thu}\n⏱️ Thời gian: ${time}\n${prefix}help + tên lệnh để xem chi tiết\n${prefix}help + all để xem tất cả lệnh`;
-        return api.sendMessage(msg, tid, mid);
-    }
-}
-function S(k) {
-    return function(a, b) {
-        let i = 0;
-        if (a[k].length > b[k].length) {
-            i = 1;
-        } else if (a[k].length < b[k].length) {
-            i = -1;
+      if (args[0] == "all") {
+        const data = cmds.values();
+        let txt = "[ LIST All COMMANDS ]\n────────────────────\n";
+        let count = 0;
+        for (const cmd of data) {
+          txt += `${++count}. Tên lệnh: ${cmd.config.name}\n📌 Mô tả: ${cmd.config.description}\n\n`;
         }
-        return i * -1;
+        txt += `\n────────────────────\n⏳ Tự động gỡ tin nhắn sau: ${autoUnsend.timeOut}s`;
+
+        send({ body: txt, attachment: video ? [video] : [] }, tid, (a, b) => {
+
+          if (b && b.messageID) {
+            setTimeout(() => {
+              api.unsendMessage(b.messageID, (err) => {
+                if (err) console.error("Lỗi khi gỡ tin nhắn:", err);
+              });
+            }, autoUnsend.timeOut * 1000);
+          } else {
+            console.error("Không thể lấy messageID để gỡ.");
+          }
+        });
+      } else {
+        const requestedCategory = args.join(" ");
+        const categoryCommands = Array.from(cmds.values()).filter(cmd => cmd.config.commandCategory.toLowerCase() === requestedCategory.toLowerCase());
+
+        if (categoryCommands.length === 0) {
+          const cmdsValue = cmds.values();
+          const arrayCmds = [];
+          for (const cmd of cmdsValue) arrayCmds.push(cmd.config.name);
+          const similarly = findBestMatch(args.join(" "), arrayCmds);
+          if (similarly.bestMatch.rating >= 0.3)
+            return send(
+              `"${args.join(" ")}" là lệnh gần giống là "${similarly.bestMatch.target}" ?`,
+              tid,
+              mid
+            );
+          else {
+            return send(`Không tìm thấy nhóm lệnh "${requestedCategory}".`, tid, mid);
+          }
+        }
+
+        let txt = `[ MENU ${requestedCategory.toUpperCase()} ]\n──────────────────\n`;
+        let count = 0;
+        for (const cmd of categoryCommands) {
+          txt += `${++count}. ${cmd.config.name} - ${cmd.config.description}\n`;
+        }
+        txt += `\n──────────────────\n📌 Tổng ${categoryCommands.length} lệnh thuộc nhóm ${requestedCategory}.\n⏳ Tự động gỡ tin nhắn sau: ${autoUnsend.timeOut}s\n👤 Dùng ${global.config.PREFIX}menu + tên lệnh nếu muốn xem chi tiết cách sử dụng lệnh`;
+
+        send({ body: txt, attachment: video ? [video] : [] }, tid, (a, b) => {
+          if (b && b.messageID) {
+            setTimeout(() => {
+              api.unsendMessage(b.messageID, (err) => {
+                if (err) console.error("Lỗi khi gỡ tin nhắn:", err);
+              });
+            }, autoUnsend.timeOut * 1000);
+          } else {
+            console.error("Không thể lấy messageID để gỡ.");
+          }
+        });
+
+      }
     }
+  } else {
+    const data = commandsGroup();
+    let txt = "[ MENU COMMANDS ]\n──────────────────\n";
+    let count = 0;
+    for (const { commandCategory, commandsName } of data)
+      txt += `${++count}. ${commandCategory} - có ${commandsName.length} lệnh\n`;
+    txt += `\n──────────────────\n╭─────────╮\n  Tổng ${global.client.commands.size} lệnh\n╰─────────╯\n⏰ Thời gian hiện tại:\n${time}\n🔎 Reply từ 1 đến ${data.length} để chọn\n⏳ Tự động gỡ tin nhắn sau: ${autoUnsend.timeOut}s\n👤 Nếu có thắc mắc gì về lệnh, bot bị lỗi thì ib trực tiếp Admin để được hỗ trợ nhé!`;
+
+    send({ body: txt, attachment: video ? [video] : [] }, tid, (a, b) => {
+      global.client.handleReply.push({
+        name: this.config.name,
+        messageID: b.messageID,
+        author: sid,
+        case: "infoGr",
+        data,
+      });
+      if (b && b.messageID) {
+        setTimeout(() => {
+          api.unsendMessage(b.messageID, (err) => {
+            if (err) console.error("Lỗi khi gỡ tin nhắn:", err);
+          });
+        }, autoUnsend.timeOut * 1000);
+      } else {
+        console.error("Không thể lấy messageID để gỡ.");
+      }
+    });
+  }
+};
+
+module.exports.handleReply = async function ({ handleReply: $, api, event }) {
+  const { sendMessage: send, unsendMessage: un } = api;
+  const { threadID: tid, messageID: mid, senderID: sid, body } = event;
+  // Parse args from body since event.args is not provided in handleReply
+  const args = body.trim().split(/\s+/);
+
+  const video = global.vdcos && global.vdcos.length > 0 ? global.vdcos.splice(0, 1)[0] : null;
+  const autoUnsend = global.config?.menu?.autoUnsend || { status: true, timeOut: 60 };
+
+  if (sid != $.author) {
+    return send(`⛔ Cút ra chỗ khác`, tid, mid);
+  }
+
+  switch ($.case) {
+    case "infoGr": {
+      const data = $.data[+args[0] - 1];
+      if (!data) {
+        return send(`"${args[0]}" không nằm trong số thứ tự menu`, tid, mid);
+      }
+
+      un($.messageID);
+      let txt = "『 " + data.commandCategory + " 』\n──────────────────\n";
+      let count = 0;
+      for (const name of data.commandsName) txt += `${++count}. ${name}\n`;
+      txt += `──────────────────\n🔎 Reply từ 1 đến ${data.commandsName.length} để chọn\n⏳ Tự động gỡ tin nhắn sau: ${autoUnsend.timeOut}s\n👤 Dùng ${global.config.PREFIX}menu + tên lệnh nếu muốn xem chi tiết cách sử dụng lệnh`;
+
+      send({ body: txt, attachment: video ? [video] : [] }, tid, (a, b) => {
+        global.client.handleReply.push({
+          name: module.exports.config.name,
+          messageID: b.messageID,
+          author: sid,
+          case: "infoCmds",
+          data: data.commandsName,
+        });
+        if (b && b.messageID) {
+          setTimeout(() => {
+            api.unsendMessage(b.messageID, (err) => {
+              if (err) console.error("Lỗi khi gỡ tin nhắn:", err);
+            });
+          }, autoUnsend.timeOut * 1000);
+        } else {
+          console.error("Không thể lấy messageID để gỡ.");
+        }
+      });
+      break;
+    }
+    case "infoCmds": {
+      const data = global.client.commands.get($.data[+args[0] - 1]);
+      if (!data) {
+        return send(`⚠️ "${args[0]}" không nằm trong số thứ tự menu`, tid, mid);
+      }
+
+      un($.messageID);
+      send(infoCmds(data.config), tid, mid);
+      break;
+    }
+  }
+};
+
+function commandsGroup() {
+  const array = [];
+  const cmds = global.client.commands.values();
+  for (const cmd of cmds) {
+    const { name, commandCategory } = cmd.config;
+    const find = array.find(i => i.commandCategory == commandCategory);
+    !find ? array.push({ commandCategory, commandsName: [name] }) : find.commandsName.push(name);
+  }
+  array.sort(sortCompare("commandsName"));
+  return array;
 }
-function TextPr(permission) {
-    p = permission;
-    return p == 0 ? "Thành Viên" : p == 1 ? "Quản Trị Viên" : p = 2 ? "Admin Bot" : "Toàn Quyền";
+
+function infoCmds(config) {
+  return `[ INFO - COMMANDS ]\n====================\n|- 📔 Tên lệnh: ${config.name}\n|- 🌴 Phiên bản: ${config.version}\n|- 🔐 Quyền hạn: ${premssionTxt(config.hasPermssion)}\n|- 👤 Tác giả: ${config.credits}\n|- 🌾 Mô tả: ${config.description}\n|- 📎 Thuộc nhóm: ${config.commandCategory}\n|- 📝 Cách dùng: ${config.usages}\n|- ⏳ Thời gian chờ: ${config.cooldowns} giây\n`;
+}
+
+function premssionTxt(level) {
+  return level == 0 ? "Thành Viên" : level == 1 ? "Quản Trị Viên Nhóm" : "Admin";
+}
+
+function sortCompare(key) {
+  return (a, b) => (a[key].length > b[key].length ? -1 : 1);
 }

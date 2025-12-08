@@ -1,6 +1,9 @@
 module.exports = function ({ api, models, Users, Threads, Currencies }) {
-    return function ({ event }) {
+    return function (eventObj) {
+        // Support both shapes: called with `event` or with `{ event }`
+        const event = eventObj?.event || eventObj;
         const { handleReaction, commands } = global.client;
+        if (!event) return;
         const { messageID, threadID } = event;
         if (handleReaction.length !== 0) {
             const indexOfHandle = handleReaction.findIndex(e => e.messageID == messageID);

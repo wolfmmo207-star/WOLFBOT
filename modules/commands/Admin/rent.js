@@ -12,11 +12,31 @@ module.exports.config = {
 const moment = require('moment');
 const fs = require('fs-extra');
 const filePath = './modules/data/thuebot.json';
-let rentKey = "./modules/data/RentKey.json"
+const rentKey = "./modules/data/RentKey.json";
 if (!fs.existsSync(rentKey)) fs.writeFileSync(rentKey, '{ "used_keys": [], "unUsed_keys": [] }', 'utf8');
-let dataRent;
+let dataRent = [];
+if (!fs.existsSync(filePath)) {
+    try {
+        fs.mkdirSync(require('path').dirname(filePath), { recursive: true });
+        fs.writeFileSync(filePath, JSON.stringify([], null, 4), 'utf8');
+    } catch (e) { /* ignore */ }
+}
+try {
+    const raw = fs.readFileSync(filePath, 'utf8') || '[]';
+    dataRent = JSON.parse(raw);
+    if (!Array.isArray(dataRent)) dataRent = [];
+} catch (e) {
+    dataRent = [];
+}
 module.exports.run = async function ({ api, Users, Threads, event, args }) {
-    dataRent = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    // refresh in-memory data from disk in case of concurrent edits
+    try {
+        const raw = fs.readFileSync(filePath, 'utf8') || '[]';
+        dataRent = JSON.parse(raw);
+        if (!Array.isArray(dataRent)) dataRent = [];
+    } catch (e) {
+        dataRent = [];
+    }
     if (args[0] === 'add') {
         const timeDay = parseInt(args[1], 10) || 30;
         let uid = event.type === "message_reply" ? event.messageReply.senderID : Object.keys(event.mentions).length > 0 ? Object.keys(event.mentions)[0] : event.senderID;
@@ -26,8 +46,8 @@ module.exports.run = async function ({ api, Users, Threads, event, args }) {
             const today = moment().format('DD/MM/YYYY');
             const endDate = toDate(timeDay, today);
             const newData = {
-                t_id: event.threadID,
-                id: uid,
+                t_id: String(event.threadID),
+                id: String(uid),
                 time_start: today,
                 time_end: endDate
             };
@@ -146,10 +166,14 @@ module.exports.run = async function ({ api, Users, Threads, event, args }) {
 }
 
 module.exports.handleReply = async function ({ api, event, handleReply }) {
-    if (event.args[0].toLowerCase() == 'giahan') {
-        let STT = event.args[1];
-        if (!handleReply.data[STT - 1]) return api.sendMessage(`STT không tồn tại`, event.threadID);
-        const timeDay = parseInt(event.args[2], 10) || 30;
+    // Parse args from body since event.args is not provided in handleReply
+    const args = event.body.trim().split(/\s+/);
+    if (args.length === 0) return api.sendMessage('Vui lòng nhập lệnh hợp lệ', event.threadID);
+    
+    if (args[0].toLowerCase() == 'giahan') {
+        let STT = parseInt(args[1], 10);
+        if (!handleReply.data || !handleReply.data[STT - 1]) return api.sendMessage(`STT không tồn tại`, event.threadID);
+        const timeDay = parseInt(args[2], 10) || 30;
         const findT = handleReply.data[STT - 1];
         const end = moment(findT.time_end, 'D/M/YYYY');
         const newEndDate = toDate(timeDay, end.format('DD/MM/YYYY'));
@@ -158,24 +182,37 @@ module.exports.handleReply = async function ({ api, event, handleReply }) {
         }
         findT.time_end = newEndDate;
         save();
-        api.sendMessage(`Nhóm ${event.threadID} thời gian thuê mới kéo dài đến ${newEndDate}.`, event.threadID);
-    } else if (event.args[0].toLowerCase() === "del") {
-        let STT = parseInt(event.args[1], 10);
+        api.sendMessage(`✅ Nhóm ${findT.t_id} thời gian thuê mới kéo dài đến ${newEndDate}.`, event.threadID);
+    } else if (args[0].toLowerCase() === "del") {
+        let STT = parseInt(args[1], 10);
+        if (!handleReply.data) return api.sendMessage('Không tìm thấy dữ liệu', event.threadID);
         if (isNaN(STT) || STT < 1 || STT > handleReply.data.length) {
             return api.sendMessage('Số thứ tự không hợp lệ hoặc nằm ngoài phạm vi danh sách.', event.threadID);
         }
         const i = handleReply.data[STT - 1];
-        const index = dataRent.findIndex(item => item.t_id === i.t_id && item.id === i.id);
+        const index = dataRent.findIndex(item => String(item.t_id) === String(i.t_id));
         if (index !== -1) {
             dataRent.splice(index, 1);
             save();
-            api.sendMessage(`Đã xóa thông tin thuê bot cho nhóm ${i.t_id}.`, event.threadID);
+            api.sendMessage(`✅ Đã xóa thông tin thuê bot cho nhóm ${i.t_id}.`, event.threadID);
+        } else {
+            api.sendMessage(`❌ Không tìm thấy nhóm trong danh sách thuê.`, event.threadID);
         }
-    } else if (event.args[0].toLowerCase() == 'out') {
-        for (let i of event.args.slice(1)) {
-            await api.removeUserFromGroup(api.getCurrentUserID(), handleReply.data[i - 1].t_id);
+    } else if (args[0].toLowerCase() == 'out') {
+        if (!handleReply.data) return api.sendMessage('Không tìm thấy dữ liệu', event.threadID);
+        const indices = args.slice(1).map(x => parseInt(x, 10)).filter(x => !isNaN(x));
+        let outCount = 0;
+        for (const idx of indices) {
+            if (idx >= 1 && idx <= handleReply.data.length) {
+                try {
+                    await api.removeUserFromGroup(api.getCurrentUserID(), handleReply.data[idx - 1].t_id);
+                    outCount++;
+                } catch (e) {
+                    console.error('Lỗi khi out nhóm:', e.message);
+                }
+            }
         }
-        api.sendMessage(`Đã out nhóm theo yêu cầu`, event.threadID);
+        api.sendMessage(`✅ Đã out ${outCount} nhóm theo yêu cầu`, event.threadID);
     } else if (handleReply.type === 'RentKey') {
         try {
             let r = fs.readFileSync(rentKey, 'utf-8');
@@ -206,11 +243,11 @@ module.exports.handleReply = async function ({ api, event, handleReply }) {
                 // Nếu thread chưa thuê bot, thêm dữ liệu mới
                 endDate = moment(currentDate, 'DD/MM/YYYY').add(num, 'days').format('DD/MM/YYYY');
                 dataRent.push({
-                    t_id: event.threadID,
-                    id: event.senderID,
-                    time_start: currentDate,
-                    time_end: endDate
-                });
+                        t_id: String(event.threadID),
+                        id: String(event.senderID),
+                        time_start: currentDate,
+                        time_end: endDate
+                    });
                 api.sendMessage(`✅ Đã thêm dữ liệu thuê bot từ ngày ${currentDate} đến ${endDate}`, event.threadID);
             }
 

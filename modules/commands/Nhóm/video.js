@@ -13,7 +13,24 @@ module.exports.config = {
 };
 
 const stream_url = async function (url) {
-    return axios({ url: url, responseType: 'stream' }).then(response => response.data);
+    // axios with timeout and retry to reduce ETIMEDOUT failures
+    const attempts = 3;
+    const timeout = 30000; // 30s timeout (catbox.moe can be slow)
+    for (let i = 0; i < attempts; i++) {
+        try {
+            const res = await axios({ url: url, responseType: 'stream', timeout });
+            return res.data;
+        } catch (e) {
+            // if final attempt or non-timeout error, fail silently (don't throw to caller)
+            if (i === attempts - 1) {
+                // last attempt failed, return null to let upload gracefully handle it
+                return null;
+            }
+            // backoff: 1s, 2s, 3s between retries
+            await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+        }
+    }
+    return null;
 };
 global.anime = [];
 global.girl = [];
@@ -33,27 +50,37 @@ module.exports.onLoad = async function (api) {
                 if (global[_status] || mảng.length > 5) return;
                 global[_status] = true;
 
-                Promise.all([...Array(7)].map(async () => {
-                    const url = _v[type][Math.floor(Math.random() * _v[type].length)];
-                    return await upload(url, api);
-                })).then(res => {
-                    mảng.push(...res);
-                    global[_status] = false;
-                });
+                try {
+                    const results = await Promise.all([...Array(7)].map(async () => {
+                        const url = _v[type][Math.floor(Math.random() * _v[type].length)];
+                        return await upload(url, api);
+                    }));
+                    // filter out null results (failed uploads) and push only successful ones
+                    mảng.push(...results.filter(r => r !== null));
+                } catch (e) {
+                    // catch any unhandled errors to prevent FCA-ERROR logs
+                    console.error(`[${type}] Video fetch error:`, e.message);
+                }
+                global[_status] = false;
             }, 1000 * 5);
         }
     });
 };
 
 const upload = async (url, api) => {
-    const form = { upload_1024: await stream_url(url) };
     try {
+        const stream = await stream_url(url);
+        // if stream is null (download failed after retries), skip this upload
+        if (!stream) {
+            return null;
+        }
+        const form = { upload_1024: stream };
         const res = await (api.postFormData ? api.postFormData('https://upload.facebook.com/ajax/mercury/upload.php', form) : Promise.resolve({ body: '' }));
         const bodyStr = res && res.body ? res.body : (typeof res === 'string' ? res : JSON.stringify(res));
         const parsed = JSON.parse(bodyStr.replace('for (;;);', ''));
         return Object.entries(parsed.payload?.metadata?.[0] || {})[0];
     } catch (e) {
-        console.error('Error uploading video:', e.message);
+        // silent fail on upload errors (prevents spam)
         return null;
     }
 };

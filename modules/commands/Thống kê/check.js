@@ -167,7 +167,16 @@ module.exports = {
     run: async function ({ api, event, Threads, args, Users }) {
         const { messageReply, mentions, threadID, messageID, senderID } = event;
         const filePath = p.join(cacheDir, `${threadID}.json`);
-        const threadData = JSON.parse(fs.readFileSync(filePath));
+        let threadData;
+        if (!fs.existsSync(filePath)) {
+            threadData = createNewFile(filePath, { isGroup: event.isGroup, participantIDs: event.participantIDs || [] });
+        } else {
+            try {
+                threadData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+            } catch (err) {
+                threadData = createNewFile(filePath, { isGroup: event.isGroup, participantIDs: event.participantIDs || [] });
+            }
+        }
 
         function quickSort(arr, key) {
             if (arr.length <= 1) return arr;
@@ -178,8 +187,11 @@ module.exports = {
             return [...quickSort(left, key), ...middle, ...quickSort(right, key)];
         }
 
+        // ensure we have a participant list when running as a command (event may not include it)
+        const participantIDs = event.participantIDs || (await Threads.getData(threadID)).threadInfo.participantIDs || [];
+
         if (args[0] === 'all') {
-            const datas = threadData.total.filter(user => event.participantIDs.includes(user.id));
+            const datas = threadData.total.filter(user => participantIDs.includes(user.id));
             const sortedData = quickSort(datas, 'count');
 
             let message = '== [ CHECKTT ] ==';
@@ -216,8 +228,8 @@ module.exports = {
 
             resets = true;
             try {
-                const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-                const participantIDs = event.participantIDs;
+                    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+                    const participantIDs = event.participantIDs || (await Threads.getData(threadID)).threadInfo.participantIDs || [];
 
                 const resetCount = (items) => {
                     return items.filter(item => participantIDs.includes(item.id)).map(item => {
@@ -285,7 +297,7 @@ module.exports = {
 
             api.sendMessage(`Đã lọc thành công ${userss.length}`, threadID);
         } else {
-            const uid = messageReply?.senderID || (mentions && Object.keys(mentions).length > 0 ? Object.keys(mentions)[0] : senderID);
+                const uid = messageReply?.senderID || (mentions && Object.keys(mentions).length > 0 ? Object.keys(mentions)[0] : senderID);
             const sortedData = quickSort(threadData.total, 'count');
             const sortedData1 = quickSort(threadData.week, 'count');
             const sortedData2 = quickSort(threadData.day, 'count');
@@ -318,7 +330,7 @@ module.exports = {
                     permission = `Thành viên`;
                 }
 
-                const totalCount = sortedData.reduce((sum, user) => sum + user.count, 0);
+                const totalCount = sortedData.reduce((sum, user) => sum + user.count, 0) || 1;
                 const tl = Math.ceil((userCount / totalCount) * 100);
 
                 const joins = join_time(joinTime);
@@ -330,9 +342,9 @@ module.exports = {
                     `📆 Số tin nhắn trong ngày: ${userCount2}\n` +
                     `⏰ Lần cuối nhắn tin: ${ttgn}\n` +
                     `🧸 Tỉ lệ tương tác: ${tl}%\n` +
-                    `🏆 Xếp hạng: ${rank}/${event.participantIDs.length} (tổng)\n` +
-                    `🏆 Xếp hạng: ${rank1}/${event.participantIDs.length} (tuần)\n` +
-                    `🏆 Xếp hạng: ${rank2}/${event.participantIDs.length} (ngày)\n` +
+                    `🏆 Xếp hạng: ${rank}/${participantIDs.length} (tổng)\n` +
+                    `🏆 Xếp hạng: ${rank1}/${participantIDs.length} (tuần)\n` +
+                    `🏆 Xếp hạng: ${rank2}/${participantIDs.length} (ngày)\n` +
                     `🕰️ Ngày vào nhóm: ${joinTime}\n` +
                     `🗓️ Đã tham gia được: ${joins}`;
 
@@ -360,7 +372,16 @@ module.exports.handleReply = async ({ api, event, handleReply, Users, Threads })
     const values = args.slice(1).map(value => parseInt(value, 10));
 
     const filePath = p.join(cacheDir, `${threadID}.json`);
-    const threadData = JSON.parse(fs.readFileSync(filePath));
+    let threadData;
+    if (!fs.existsSync(filePath)) {
+        threadData = createNewFile(filePath, { isGroup: false, participantIDs: [] });
+    } else {
+        try {
+            threadData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        } catch (err) {
+            threadData = createNewFile(filePath, { isGroup: false, participantIDs: [] });
+        }
+    }
 
 
     if (keyword === 'lọc') {

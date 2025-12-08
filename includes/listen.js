@@ -5,6 +5,7 @@ module.exports = function ({ api, models }) {
   const Currencies = require("./controllers/currencies")({ models });
   const fs = require('fs');
   const path = require('path');
+  const moment = require('moment-timezone');
   const logger = require("../utils/log.js");
 
   // Load data handlers
@@ -84,9 +85,48 @@ module.exports = function ({ api, models }) {
   })();
 
   // Check TT (Tương Tác) System
-  const checkttDataPath = path.join(__dirname, '../modules/commands/checktt');
+  // Standardize CHECKTT storage directory used by modules/commands/Thống kê/check.js
+  const checkttDataPath = path.join(__dirname, '../modules/data/checktts');
+  // Initialize guards so the scheduler does not fire a "New Day"/total summary immediately on bot startup
+  // This prevents the noisy behaviour of sending summaries right after the bot starts.
+  try {
+    const nowInit = moment.tz('Asia/Ho_Chi_Minh');
+    global.lastDay = global.lastDay ?? nowInit.day();
+    global.lastCheckttSentDay = global.lastCheckttSentDay ?? nowInit.format('YYYY-MM-DD');
+  } catch (e) { /* ignore */ }
   setInterval(async () => {
-    const day = moment.tz("Asia/Ho_Chi_Minh").day();
+    const now = moment.tz("Asia/Ho_Chi_Minh");
+    const day = now.day();
+    // Send daily summary at 23:59 local time (once per day)
+    try {
+      const hour = now.hour();
+      const minute = now.minute();
+      const todayKey = now.format('YYYY-MM-DD');
+      if (hour === 23 && minute === 59 && global.lastCheckttSentDay !== todayKey) {
+        global.lastCheckttSentDay = todayKey;
+        if (fs.existsSync(checkttDataPath)) {
+          const files = fs.readdirSync(checkttDataPath);
+          logger("--> CHECKTT: 23:59 Daily Send");
+          for (const file of files) {
+            if (!file.endsWith('.json')) continue;
+            try {
+              const checktt = JSON.parse(fs.readFileSync(path.join(checkttDataPath, file)));
+              let storage = [];
+              let count = 1;
+              for (const item of checktt.day || []) {
+                const userName = await Users.getNameUser(item.id) || "Facebook User";
+                const itemToPush = { ...item, name: userName };
+                storage.push(itemToPush);
+              }
+              storage.sort((a, b) => b.count - a.count);
+              let checkttBody = "[ Top 20 Tương Tác Ngày - 23:59 ]\n─────────────────\n";
+              checkttBody += storage.slice(0, 20).map(item => `${count++}. ${item.name} - ${item.count} tin.`).join('\n');
+              api.sendMessage(`${checkttBody}\n─────────────────\nTổng tin nhắn trong ngày: ${storage.reduce((a, b) => a + b.count, 0)} tin\n⚡ Các bạn khác cố gắng tương tác nếu muốn lên top nha :3`, file.replace('.json', ''), err => err ? logger(err) : '');
+            } catch (e) { logger(e); }
+          }
+        }
+      }
+    } catch (e) { /* non-fatal */ }
     if (global.lastDay !== day) {
       global.lastDay = day;
       if (fs.existsSync(checkttDataPath)) {
@@ -106,6 +146,7 @@ module.exports = function ({ api, models }) {
           let checkttBody = "[ Top 20 Tương Tác Ngày ]\n─────────────────\n";
           checkttBody += storage.slice(0, 20).map(item => `${count++}. ${item.name} - ${item.count} tin.`).join('\n');
           api.sendMessage(`${checkttBody}\n─────────────────\nTổng tin nhắn trong ngày: ${storage.reduce((a, b) => a + b.count, 0)} tin\n⚡ Các bạn khác cố gắng tương tác nếu muốn lên top nha :3`, file.replace('.json', ''), err => err ? logger(err) : '');
+          if (!checktt.last) checktt.last = { time: day, day: [], week: [] };
           checktt.last.day = [...checktt.day];
           checktt.day.forEach(e => e.count = 0);
           checktt.time = day;
@@ -128,6 +169,7 @@ module.exports = function ({ api, models }) {
             let checkttBody = "[ Top 20 Tương Tác Tuần ]\n─────────────────\n";
             checkttBody += storage.slice(0, 10).map(item => `${count++}. ${item.name} - ${item.count} tin.`).join('\n');
             api.sendMessage(`${checkttBody}\n─────────────────\nTổng tin nhắn trong tuần: ${storage.reduce((a, b) => a + b.count, 0)} tin.\n⚡ Các bạn khác cố gắng tương tác nếu muốn lên top nha :>`, file.replace('.json', ''), err => err ? logger(err) : '');
+            if (!checktt.last) checktt.last = { time: day, day: [], week: [] };
             checktt.last.week = [...checktt.week];
             checktt.week.forEach(e => e.count = 0);
             fs.writeFileSync(path.join(checkttDataPath, file), JSON.stringify(checktt, null, 4));
@@ -145,6 +187,65 @@ module.exports = function ({ api, models }) {
     5: 31 * 24 * 60 * 60 * 1000, 6: 30 * 24 * 60 * 60 * 1000, 7: 31 * 24 * 60 * 60 * 1000, 8: 31 * 24 * 60 * 60 * 1000,
     9: 30 * 24 * 60 * 60 * 1000, 10: 31 * 24 * 60 * 60 * 1000, 11: 30 * 24 * 60 * 60 * 1000, 12: 31 * 24 * 60 * 60 * 1000
   };
+
+  // Rent / Pending cleanup: remove expired rents and stale pending requests periodically
+  (function rentAndPendingCleanup() {
+    const rentFile = path.join(__dirname, '../modules/data/thuebot.json');
+    const approvedThreadsPath = path.join(__dirname, '../utils/data/approvedThreads.json');
+    const pendingThreadsPathLocal = path.join(__dirname, '../utils/data/pendingThreads.json');
+    const pendingExpiryDays = (global.config && global.config.PENDING_EXPIRY_DAYS) ? parseInt(global.config.PENDING_EXPIRY_DAYS, 10) : 7;
+
+    const cleanup = async () => {
+      // cleanup expired rents
+      try {
+        if (!fs.existsSync(rentFile)) return;
+        let rentData = JSON.parse(fs.readFileSync(rentFile, 'utf8')) || [];
+        let changed = false;
+        const now = Date.now();
+        for (let i = rentData.length - 1; i >= 0; i--) {
+          try {
+            const parts = (rentData[i].time_end || '').split('/').reverse().join('/');
+            const expire = new Date(parts).getTime();
+            if (!expire || expire <= now) {
+              // expired — remove and un-approve the thread if needed
+              const removed = rentData.splice(i, 1)[0];
+              changed = true;
+              try {
+                if (fs.existsSync(approvedThreadsPath)) {
+                  let approved = JSON.parse(fs.readFileSync(approvedThreadsPath, 'utf8')) || [];
+                  const idx = approved.indexOf(removed.t_id);
+                  if (idx !== -1) {
+                    approved.splice(idx, 1);
+                    fs.writeFileSync(approvedThreadsPath, JSON.stringify(approved, null, 2), 'utf8');
+                  }
+                }
+                // notify the group about expiry (best-effort)
+                try { api.sendMessage(`⚠️ Thời gian thuê bot của nhóm này đã hết hạn. Vui lòng gia hạn hoặc liên hệ admin để tiếp tục sử dụng.`, removed.t_id); } catch (e) { /* ignore */ }
+              } catch (e) { /* ignore */ }
+            }
+          } catch (e) { /* ignore parse errors */ }
+        }
+        if (changed) fs.writeFileSync(rentFile, JSON.stringify(rentData, null, 2), 'utf8');
+      } catch (e) { /* non-fatal */ }
+
+      // cleanup stale pending requests older than pendingExpiryDays
+      try {
+        if (!fs.existsSync(pendingThreadsPathLocal)) return;
+        let pending = JSON.parse(fs.readFileSync(pendingThreadsPathLocal, 'utf8')) || [];
+        const threshold = Date.now() - pendingExpiryDays * 24 * 60 * 60 * 1000;
+        const newPending = pending.filter(item => {
+          if (!item) return false;
+          if (typeof item === 'string') return false; // old-format entries removed
+          return (item.requestedAt && item.requestedAt >= threshold) || false;
+        });
+        if (newPending.length !== pending.length) fs.writeFileSync(pendingThreadsPathLocal, JSON.stringify(newPending, null, 2), 'utf8');
+      } catch (e) { /* ignore */ }
+    };
+
+    // run cleanup now and every hour
+    cleanup();
+    setInterval(cleanup, 1000 * 60 * 60);
+  })();
   const checkTime = (time) => new Promise(async resolve => {
     time.forEach((e, i) => time[i] = parseInt(String(e).trim()));
     const getDayFromMonth = (month) => month == 2 ? (time[2] % 4 == 0 ? 29 : 28) : [1,3,5,7,8,10,12].includes(month) ? 31 : 30;
@@ -236,7 +337,25 @@ module.exports = function ({ api, models }) {
     const boxAdmin = global.config.BOXADMIN;
     const threadInfo = await api.getThreadInfo(event.threadID);
     const threadName = threadInfo.threadName;
-    if (!approvedThreads.includes(event.threadID) && !adminBot.includes(event.senderID) && !ndh.includes(event.senderID)) {
+    // Allow rented boxes (thuebot) to bypass Admin approval requirement
+    let isRentedBox = false;
+    try {
+      const rentFile = path.join(__dirname, '../modules/data/thuebot.json');
+      if (fs.existsSync(rentFile)) {
+        const rentData = JSON.parse(fs.readFileSync(rentFile, 'utf8')) || [];
+        const rentEntry = (rentData || []).map(x => ({ ...x, t_id: String(x.t_id) })).find(x => String(x.t_id) === String(event.threadID));
+        if (rentEntry) {
+          // validate expiration
+          try {
+            const parts = rentEntry.time_end.split('/').reverse().join('/');
+            const expire = new Date(parts).getTime();
+            if (expire > Date.now()) isRentedBox = true;
+          } catch (e) { /* ignore parse errors */ }
+        }
+      }
+    } catch (e) { /* ignore */ }
+
+    if (!approvedThreads.includes(event.threadID) && !adminBot.includes(event.senderID) && !ndh.includes(event.senderID) && !isRentedBox) {
       const data = await Threads.getData(String(event.threadID)) || {};
       const prefix = data.PREFIX || global.config.PREFIX;
       const botName = global.config.BOTNAME;
@@ -246,10 +365,15 @@ module.exports = function ({ api, models }) {
           if (err) console.error(err);
           await new Promise(resolve => setTimeout(resolve, 10 * 1000));
           api.unsendMessage(info.messageID);
-          let pendingThreads = JSON.parse(fs.readFileSync(pendingThreadsPath, 'utf-8'));
-          if (!pendingThreads.includes(event.threadID)) {
-            pendingThreads.push(event.threadID);
-            fs.writeFileSync(pendingThreadsPath, JSON.stringify(pendingThreads, null, 2), 'utf-8');
+          try {
+            let pendingThreads = JSON.parse(fs.readFileSync(pendingThreadsPath, 'utf-8')) || [];
+            // store as objects with timestamp so we can auto-expire pending requests
+            if (!pendingThreads.some(item => (item && (item.threadID || item) == event.threadID))) {
+              pendingThreads.push({ threadID: event.threadID, requestedAt: Date.now() });
+              fs.writeFileSync(pendingThreadsPath, JSON.stringify(pendingThreads, null, 2), 'utf-8');
+            }
+          } catch (e) {
+            try { fs.writeFileSync(pendingThreadsPath, JSON.stringify([{ threadID: event.threadID, requestedAt: Date.now() }], null, 2), 'utf-8'); } catch (err) { /* ignore */ }
           }
         });
       }
@@ -268,6 +392,18 @@ module.exports = function ({ api, models }) {
       await handlers.handleSendEvent(event);
       await handlers.handleEvent(event);
       return handlers.handleRefresh(event);
+    }
+
+    // Show a console frame for incoming messages (if the global helper exists)
+    try {
+      if (type === 'message' && typeof global.showFrame === 'function') {
+        const senderName = global.data.userName.get(String(event.senderID)) || await Users.getNameUser(String(event.senderID)) || 'Unknown';
+        const threadNameLocal = threadName || (await api.getThreadInfo(event.threadID)).threadName || 'Unknown';
+        const timeLocal = moment.tz('Asia/Ho_Chi_Minh').format('HH:mm:ss DD/MM/YYYY');
+        global.showFrame({ threadName: threadNameLocal, senderName, message: event.body || '', time: timeLocal });
+      }
+    } catch (err) {
+      logger('showFrame invocation error: ' + err.message, 'error');
     }
 
     switch (type) {

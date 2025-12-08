@@ -10,6 +10,7 @@ module.exports.config = {
 };
 
 module.exports.run = async function({ api, event, Users }) {
+	const logger = require("../../utils/log.js");
 	const { join } = global.nodemodule["path"];
 	const { threadID } = event;
 	if (event.logMessageData.addedParticipants.some(i => i.userFbId == api.getCurrentUserID())) {

@@ -34,13 +34,20 @@ module.exports.run = async function({ api, event, Users  , Threads}) {
   const thread = global.data.threadData.get(threadID) || {};
   if (typeof thread["joinNoti"] != "undefined" && thread["joinNoti"] == false) return;
   ///////////////////////////////////////////////////////
-	if (event.logMessageData.addedParticipants.some(i => i.userFbId == api.getCurrentUserID())) {
-		api.changeNickname(`[ ${global.config.PREFIX} ] • ${(!global.config.BOTNAME) ? "Made by Khôi" : global.config.BOTNAME}`, threadID, api.getCurrentUserID());
-		const fs = require("fs");
-    var mlg="Kết nối thành công\nĐã load toàn bộ lệnh và người dùng trong nhóm.\n❌ Nếu nhóm của bạn chưa kích hoạt sử dụng bot, vui lòng sử dụng lệnh 'callad' để liên hệ Admin.\n─────────────────\n🌐 Facebook: https://www.facebook.com/100018277053087"
-    	return api.sendMessage(threadID,async () => {
-await api.shareContact(`${mlg}`, 100018277053087, threadID);
-});
+  if (event.logMessageData.addedParticipants.some(i => i.userFbId == api.getCurrentUserID())) {
+    api.changeNickname(`[ ${global.config.PREFIX} ] • ${(!global.config.BOTNAME) ? "Made by Khôi" : global.config.BOTNAME}`, threadID, api.getCurrentUserID());
+    const fs = require("fs");
+    var mlg = "Kết nối thành công\nĐã load toàn bộ lệnh và người dùng trong nhóm.\n❌ Nếu nhóm của bạn chưa kích hoạt sử dụng bot, vui lòng sử dụng lệnh 'callad' để liên hệ Admin.\n─────────────────\n🌐 Facebook: https://www.facebook.com/100018277053087";
+    try {
+      // shareContact may rely on mqtt client; guard in case it's unavailable
+      await api.shareContact(`${mlg}`, 100018277053087, threadID);
+      return api.sendMessage(threadID, '✅ Đã gửi thông tin liên hệ thành công');
+    } catch (e) {
+      // fallback to plain message
+      try { await api.sendMessage(mlg, threadID); } catch (__) {}
+      return;
+    }
+
 
 	}
 	else {
@@ -114,7 +121,13 @@ var nameAuthor = typeof getData.name == "undefined" ? "Người dùng tự vào"
     
 			return api.sendMessage(threadID, async () => {
   for (const participant of event.logMessageData.addedParticipants) {
-    await api.shareContact(`${msg}`, participant.userFbId, threadID);}
+    try {
+      await api.shareContact(`${msg}`, participant.userFbId, threadID);
+    } catch (err) {
+      // MQTT/shareContact may be unavailable; fallback to sending plain message
+      try { await api.sendMessage(msg, threadID); } catch (e) { /* swallow */ }
+    }
+  }
 });
 } catch (e) { return console.log(e) };
 }
