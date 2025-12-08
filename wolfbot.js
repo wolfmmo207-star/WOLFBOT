@@ -114,7 +114,6 @@ function onBot({ models }) {
         logger.loader(` ID BOT: ${userId}`);
         logger.loader(` Prefix: ${global.config.PREFIX}`);
         logger.loader(` NAME BOT: ${(!global.config.BOTNAME) ? "" : global.config.BOTNAME}`);
-        );
 
         console.log(bottomBox);
 
