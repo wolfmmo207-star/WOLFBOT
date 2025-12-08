@@ -191,10 +191,29 @@ module.exports = {
         const participantIDs = event.participantIDs || (await Threads.getData(threadID)).threadInfo.participantIDs || [];
 
         if (args[0] === 'all') {
-            const datas = threadData.total.filter(user => participantIDs.includes(user.id));
-            const sortedData = quickSort(datas, 'count');
+            // Calculate real-time stats for current active members only
+            const now = moment.tz('Asia/Ho_Chi_Minh');
+            const startOfDay = now.clone().startOf('day');
+            const startOfWeek = now.clone().startOf('week');
 
-            let message = '== [ CHECKTT ] ==';
+            // Filter to only active members
+            const activeMembersData = threadData.total
+                .filter(user => participantIDs.includes(user.id))
+                .map(user => {
+                    // Recalculate week and day counts from cache
+                    const weekData = threadData.week.find(w => w.id === user.id) || { count: 0 };
+                    const dayData = threadData.day.find(d => d.id === user.id) || { count: 0 };
+
+                    return {
+                        ...user,
+                        weekCount: weekData.count || 0,
+                        dayCount: dayData.count || 0
+                    };
+                });
+
+            const sortedData = quickSort(activeMembersData, 'count');
+
+            let message = '== [ CHECKTT - THỐNG KÊ REAL-TIME ] ==\n';
             for (const [index, user] of sortedData.entries()) {
                 const userInfo = await Users.getData(user.id);
 
@@ -203,10 +222,10 @@ module.exports = {
                     const đcm = await api.getUserInfo(user.id);
                     userName = đcm[user.id]?.name || "Unknown"
                 }
-                message += `\n${index + 1}. ${userName}: ${user.count}`;
+                message += `\n${index + 1}. ${userName}\n   📊 Tổng: ${user.count} | 📅 Tuần: ${user.weekCount} | 📆 Ngày: ${user.dayCount}`;
             }
 
-            api.sendMessage(message + `\n\nReply tin nhắn này kèm\n+lọc + số tin nhắn: bot sẽ lọc những người có số tin nhắn từ số tin nhắn mà người dùng nhập vào\n+kick + stt (có thể nhập nhiều, cách nhau bằng dấu cách): bot sẽ kick người đó khỏi nhóm\n+reset: để reset tin nhắn về 0\n\nGỡ tự động sau 60s`, threadID, (err, info) => {
+            api.sendMessage(message + `\n\n━━━━━━━━━━━━━━━━━\nReply tin nhắn này kèm:\n• +lọc + số: lọc người có tin nhắn ≤ số\n• +kick + stt: kick những người chỉ định\n• +reset: reset lại số tin nhắn\n\n🔄 Dữ liệu được cập nhật real-time\n⏱️ Gỡ tự động sau 60s`, threadID, (err, info) => {
                 if (err) return console.error(err);
                 global.client.handleReply.push({
                     name: module.exports.config.name,
@@ -218,7 +237,7 @@ module.exports = {
                 setTimeout(() => { api.unsendMessage(info.messageID) }, 60000);//chỉnh time ở đây
             });
 
-            threadData.total = datas;
+            threadData.total = activeMembersData;
             fs.writeFileSync(filePath, JSON.stringify(threadData, null, 4));
         } else if (args[0] === 'reset') {
             const dataThread = (await Threads.getData(event.threadID)).threadInfo;
@@ -298,6 +317,12 @@ module.exports = {
             api.sendMessage(`Đã lọc thành công ${userss.length}`, threadID);
         } else {
                 const uid = messageReply?.senderID || (mentions && Object.keys(mentions).length > 0 ? Object.keys(mentions)[0] : senderID);
+            
+            // Check if user is still in the group
+            if (!participantIDs.includes(uid)) {
+                return api.sendMessage(`❌ Người dùng này không còn trong nhóm.`, threadID, messageID);
+            }
+
             const sortedData = quickSort(threadData.total, 'count');
             const sortedData1 = quickSort(threadData.week, 'count');
             const sortedData2 = quickSort(threadData.day, 'count');
@@ -310,9 +335,14 @@ module.exports = {
                 const userCount1 = sortedData1[userIndex1]?.count || 0;
                 const userCount2 = sortedData2[userIndex2]?.count || 0;
 
-                const rank = userIndex + 1; // xếp hạng tổng
-                const rank1 = userIndex1 + 1; // xếp hạng tuần
-                const rank2 = userIndex2 + 1; // xếp hạng ngày
+                // Rank only among active members
+                const activeMembers = sortedData.filter(u => participantIDs.includes(u.id));
+                const activeMembersWeek = sortedData1.filter(u => participantIDs.includes(u.id));
+                const activeMembersDay = sortedData2.filter(u => participantIDs.includes(u.id));
+
+                const rank = activeMembers.findIndex(u => u.id == uid) + 1;
+                const rank1 = activeMembersWeek.findIndex(u => u.id == uid) + 1;
+                const rank2 = activeMembersDay.findIndex(u => u.id == uid) + 1;
 
                 const ttgn = sortedData[userIndex].ttgn;
                 const joinTime = sortedData[userIndex].joinTime;
@@ -366,7 +396,7 @@ module.exports.handleReply = async ({ api, event, handleReply, Users, Threads })
 
     if (!botIsAdmin) return api.sendMessage("❌ Bot cần quyền quản trị viên để thực hiện lệnh này.", threadID, messageID);
 
-    const args = body.trim().split(' ');
+    const args = body.trim().split(/\s+/);
 
     const keyword = args[0].trim().toLowerCase();
     const values = args.slice(1).map(value => parseInt(value, 10));
@@ -383,14 +413,18 @@ module.exports.handleReply = async ({ api, event, handleReply, Users, Threads })
         }
     }
 
+    // Get current participants for filtering
+    const participantIDs = dataThread.participantIDs || [];
 
     if (keyword === 'lọc') {
         const sl = parseInt(values[0], 10);
 
         if (isNaN(sl)) return api.sendMessage("Thiếu số", threadID, messageID);
 
-
-        const userss = threadData.total.filter(user => user.count <= sl).map(user => user.id);
+        // Only filter active members
+        const userss = threadData.total
+            .filter(user => participantIDs.includes(user.id) && user.count <= sl)
+            .map(user => user.id);
 
         if (userss.length === 0) return api.sendMessage("Không có thành viên nào có số tin nhắn nhỏ hơn hoặc bằng " + sl, threadID, messageID);
         const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -400,21 +434,24 @@ module.exports.handleReply = async ({ api, event, handleReply, Users, Threads })
             await delay(500);
         }
 
-        api.sendMessage(`Đã lọc thành công ${userss.length}`, threadID);
+        api.sendMessage(`✅ Đã lọc thành công ${userss.length} thành viên`, threadID);
 
     } else if (keyword === 'kick') {
         if (values.length === 0) return api.sendMessage("Thiếu số", threadID, messageID);
 
-        if (!values.every(value => /^\d+$/.test(value))) return api.sendMessage(`Nhập số?`, threadID, messageID);
+        if (!values.every(value => !isNaN(value))) return api.sendMessage(`Nhập số?`, threadID, messageID);
 
         const listDel = values.map(value => parseInt(value, 10));
 
-        const Thằng_Bị_kick_list = handleReply.sortedData;
+        const Thằng_Bị_kick_list = handleReply.sortedData || [];
 
         let Thằng_Ngu_Bị_Kick = [];
         const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
         for (const [index, user] of Thằng_Bị_kick_list.entries()) {
             if (listDel.includes(index + 1)) {
+                // Check if user still in group
+                if (!participantIDs.includes(user.id)) continue;
+                
                 try {
                     const userInfo = await Users.getData(user.id);
                     const userName = userInfo.name;
@@ -428,14 +465,14 @@ module.exports.handleReply = async ({ api, event, handleReply, Users, Threads })
             }
         }
         if (Thằng_Ngu_Bị_Kick.length > 0) {
-            const message = `Đã kick ${Thằng_Ngu_Bị_Kick.join(', ')}`;
+            const message = `✅ Đã kick ${Thằng_Ngu_Bị_Kick.join(', ')}`;
             api.sendMessage(message, threadID);
         }
     } else if (keyword === 'reset') {
         resets = true;
         try {
             const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-            const participantIDs = event.participantIDs;
+            const participantIDs = dataThread.participantIDs || [];
     
             const resetCount = (items) => {
                 return items.filter(item => participantIDs.includes(item.id)).map(item => {
