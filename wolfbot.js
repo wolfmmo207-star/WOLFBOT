@@ -23,7 +23,7 @@ global.client = {
   handleReply: [],
   mainPath: process.cwd(),
   configPath: "",
-  getTime: option => moment.tz("Asia/Ho_Chi_minh").format({ seconds: "ss", minutes: "mm", hours: "HH", date: "DD", month: "MM", year: "YYYY", fullHour: "HH:mm:ss", fullYear: "DD/MM/YYYY", fullTime: "HH:mm:ss DD/MM/YYYY" }[option])
+  getTime: option => moment.tz("Asia/Ho_Chi_Minh").format({ seconds: "ss", minutes: "mm", hours: "HH", date: "DD", month: "MM", year: "YYYY", fullHour: "HH:mm:ss", fullYear: "DD/MM/YYYY", fullTime: "HH:mm:ss DD/MM/YYYY" }[option])
 };
 global.data = new Object({
     threadInfo: new Map(),
@@ -229,23 +229,6 @@ function onBot({ models }) {
             const loadedEventsCount = loadModules(eventPath, 'events', global.config.eventDisabled, 'events');
             logger.loader(`Loaded ${loadedEventsCount} events`);
         })();
-        // Provide compatibility shim for upload helpers expecting api.postFormData
-        try {
-          if (typeof api.postFormData !== 'function') {
-            api.postFormData = async function (url, form) {
-              try {
-                if (typeof api.httpPostFormData === 'function') return await api.httpPostFormData(url, form);
-              } catch (e) {}
-              const FormData = require('form-data');
-              const axios = require('axios');
-              const fd = new FormData();
-              for (const k in form) fd.append(k, form[k]);
-              const headers = fd.getHeaders ? fd.getHeaders() : {};
-              const res = await axios.post(url, fd, { headers: headers, withCredentials: true });
-              return { body: typeof res.data === 'string' ? res.data : JSON.stringify(res.data) };
-            };
-          }
-        } catch (e) { console.error('Error setting postFormData shim:', e.message); }
         logger.loader(' Ping load source: ' + (Date.now() - global.client.timeStart) + 'ms');
         writeFileSync('./config.json', JSON.stringify(global.config, null, 4), 'utf8');
         const listener = require('./includes/listen')({ api, models });
